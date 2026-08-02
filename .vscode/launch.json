@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "preLaunchTask": "CMake: build",
+    "configurations": [
+        {
+            "name": "Launch CMake Target",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/Debug/VulkanTutorial.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake: build"
+        }
+    ]
+}

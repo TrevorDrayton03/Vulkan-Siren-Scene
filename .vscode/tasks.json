@@ -1,0 +1,49 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "CMake: configure",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S",
+                "${workspaceFolder}",
+                "-B",
+                "${workspaceFolder}/build",
+                "-G",
+                "Visual Studio 17 2022",
+                "-A",
+                "x64"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Shaders: compile",
+            "type": "shell",
+            "command": "${workspaceFolder}\\compile.bat",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "CMake: build",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build",
+                "--config",
+                "Debug"
+            ],
+            "dependsOn": [
+                "CMake: configure",
+                "Shaders: compile"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": [
+                "$msCompile"
+            ]
+        }
+    ]
+}

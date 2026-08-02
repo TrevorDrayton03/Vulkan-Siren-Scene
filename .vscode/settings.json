@@ -1,0 +1,31 @@
+{
+    "[cpp]": {
+                "editor.quickSuggestions": {
+            "other": "on",
+            "comments": "off",
+            "strings": "off",
+        },
+        "editor.suggestOnTriggerCharacters": true,
+        "editor.wordBasedSuggestions": "off",       // suggestions based on words found elsewhere in my files
+        "editor.suggest.showWords": false,          // plain text words that are not recognized code symbols
+        "editor.suggest.showSnippets": false,       // code templates and reusable snippet suggestions
+        "editor.suggest.showMethods": true,         // member functions called through an object or class
+        "editor.suggest.showFunctions": true,       // free-standing functions such as glfwInit or glfwWindowHint
+        "editor.suggest.showConstructors": true,    // functions used to construct or create class objects
+        "editor.suggest.showOperators": false,      // overloaded operators such as operator= or operator[]
+        "editor.suggest.showKeywords": false,       // C++ keywords such as if, class, return, and constexpr
+        "editor.suggest.showVariables": true,       // local, global, and namespace variables
+        "editor.suggest.showProperties": true,      // members classified as properties by IntelliSense
+        "editor.suggest.showFields": true           // struct and class data members such as createInfo.sType
+    },
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/external/glfw-src/include",
+        "${workspaceFolder}/external/glm-src",
+        "${env:VULKAN_SDK}/Include",
+        "${workspaceFolder}/external/tinyobjloader-src",
+        "${workspaceFolder}/external/stb-src",
+    ],
+    "editor.trimAutoWhitespace": false,              // prevents vs code from deleting indentation and returning cursor to far-left column
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "C_Cpp.default.cppStandard": "c++20",
+}
