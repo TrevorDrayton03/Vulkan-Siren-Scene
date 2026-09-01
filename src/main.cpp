@@ -250,11 +250,13 @@ private:
             .queueFamilyIndexCount = 1,
             .pQueueFamilyIndices = VK_NULL_HANDLE,
             .preTransform = physicalDevice.getSurfaceCapabilities2KHR(surfaceInfo).surfaceCapabilities.currentTransform,
-            .compositeAlpha = {},
+            .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
             .presentMode = vk::PresentModeKHR::eFifo, // hard coded for windows (instead of querying the surface and the physical device)
             .clipped = VK_FALSE,
             .oldSwapchain = VK_NULL_HANDLE,
         };
+        swapchain = vk::raii::SwapchainKHR(device, createInfo);
+        swapchainImages = swapchain.getImages();
     };
 
     void initVulkan()
