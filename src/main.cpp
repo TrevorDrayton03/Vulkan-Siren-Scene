@@ -40,13 +40,17 @@ private:
     vk::raii::Queue queue = VK_NULL_HANDLE;
     vk::raii::SurfaceKHR surface = VK_NULL_HANDLE;
     vk::raii::SwapchainKHR swapchain = VK_NULL_HANDLE;
-    std::vector<vk::Image> swapchainImages;
-    std::vector<vk::ImageView> swapchainImageViews;
-    vk::SurfaceFormatKHR swapchainSurfaceFormat;
-    vk::Extent2D swapchainExtent;
+    std::vector<vk::Image> swapchainImages{};
+    std::vector<vk::ImageView> swapchainImageViews{};
+    vk::SurfaceFormatKHR swapchainSurfaceFormat{};
+    vk::Extent2D swapchainExtent{};
     vk::Format swapchainFormat = vk::Format::eB8G8R8A8Srgb;
+    vk::raii::CommandPool commandPool = VK_NULL_HANDLE;
+    vk::raii::CommandBuffers commandBuffers = VK_NULL_HANDLE;
 
+    uint32_t queueIndex = ~0;
     uint32_t swapchainImageCount = 3;
+    uint32_t framesInFlight = 2;
 
     const std::vector<char const *> layers =
         {
@@ -183,7 +187,6 @@ private:
         std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
 
         // get the first index into queueFamilyProperties which supports both graphics and present
-        uint32_t queueIndex = ~0;
         for (uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++)
         {
             if ((queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eGraphics) &&
@@ -240,7 +243,6 @@ private:
         surfaceInfo.surface = *surface;
 
         vk::SwapchainCreateInfoKHR createInfo = {
-            .flags = {},
             .surface = *surface,
             .minImageCount = swapchainImageCount,
             .imageFormat = swapchainFormat,                                                                          // hard coded for windows (instead of querying the surface)
@@ -276,6 +278,26 @@ private:
         };
     };
 
+    void createCommandPool()
+    {
+        vk::CommandPoolCreateInfo createInfo = {
+            .queueFamilyIndex = queueIndex,
+        };
+
+        commandPool = vk::raii::CommandPool(device, createInfo);
+    };
+
+    void allocateCommandBuffers()
+    {
+        vk::CommandBufferAllocateInfo allocateInfo = {
+            .commandPool = commandPool,
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = framesInFlight,
+        };
+
+        commandBuffers = vk::raii::CommandBuffers(device, allocateInfo);
+    };
+    
     void initVulkan()
     {
         createInstance();
@@ -284,6 +306,8 @@ private:
         createLogicalDevice();
         createSwapchain();
         createImageViews();
+        createCommandPool();
+        allocateCommandBuffers();
     }
 
     void mainLoop()
