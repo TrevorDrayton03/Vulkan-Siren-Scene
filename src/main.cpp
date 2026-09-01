@@ -44,6 +44,9 @@ private:
     std::vector<vk::ImageView> swapchainImageViews;
     vk::SurfaceFormatKHR swapchainSurfaceFormat;
     vk::Extent2D swapchainExtent;
+    vk::Format swapchainFormat = vk::Format::eB8G8R8A8Srgb;
+
+    uint32_t swapchainImageCount = 3;
 
     const std::vector<char const *> layers =
         {
@@ -237,11 +240,10 @@ private:
         surfaceInfo.surface = *surface;
 
         vk::SwapchainCreateInfoKHR createInfo = {
-            .pNext = VK_NULL_HANDLE,
             .flags = {},
             .surface = *surface,
-            .minImageCount = 2,
-            .imageFormat = vk::Format::eB8G8R8A8Srgb,                                                                // hard coded for windows (instead of querying the surface)
+            .minImageCount = swapchainImageCount,
+            .imageFormat = swapchainFormat,                                                                          // hard coded for windows (instead of querying the surface)
             .imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,                                                    // hard coded for Windows (instead of querying the surface)
             .imageExtent = physicalDevice.getSurfaceCapabilities2KHR(surfaceInfo).surfaceCapabilities.currentExtent, // just getting the fixed extent (for Windows)
             .imageArrayLayers = 1,
@@ -259,6 +261,21 @@ private:
         swapchainImages = swapchain.getImages();
     };
 
+    void createImageViews()
+    {
+        for (int i = 0; i < swapchainImageCount; i++)
+        {
+            vk::ImageViewCreateInfo createInfo = {
+                .image = swapchainImages[i],
+                .viewType = vk::ImageViewType::e2D,
+                .format = swapchainFormat,
+                .components = {.r = vk::ComponentSwizzle::eIdentity, .g = vk::ComponentSwizzle::eIdentity, .b = vk::ComponentSwizzle::eIdentity, .a = vk::ComponentSwizzle::eIdentity},
+                .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+            };
+            swapchainImageViews.emplace_back(vk::raii::ImageView(device, createInfo));
+        };
+    };
+
     void initVulkan()
     {
         createInstance();
@@ -266,6 +283,7 @@ private:
         choosePhysicalDevice();
         createLogicalDevice();
         createSwapchain();
+        createImageViews();
     }
 
     void mainLoop()
