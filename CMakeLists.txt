@@ -30,7 +30,7 @@ FetchContent_Declare(
 FetchContent_Declare(
     glm
     GIT_REPOSITORY https://github.com/g-truc/glm.git
-    GIT_TAG 1.0.1
+    GIT_TAG 1.0.3
 )
 
 FetchContent_Declare(
@@ -45,7 +45,13 @@ FetchContent_Declare(
     GIT_TAG master
 )
 
-FetchContent_MakeAvailable(glfw glm tinyobjloader stb)
+FetchContent_Declare(
+    vma
+    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+    GIT_TAG v3.4.0
+)
+
+FetchContent_MakeAvailable(glfw glm tinyobjloader stb vma)
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 # allows designated initializers
@@ -53,7 +59,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
 )
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/external/stb-src") # stb is comprised of single-header libraries and does not provide a normal CMake target to link against
-target_link_libraries(${PROJECT_NAME} Vulkan::Vulkan glfw glm::glm tinyobjloader)
+target_link_libraries(${PROJECT_NAME} Vulkan::Vulkan glfw glm::glm tinyobjloader GPUOpen::VulkanMemoryAllocator)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 

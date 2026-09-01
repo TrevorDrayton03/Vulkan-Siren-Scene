@@ -1,8 +1,9 @@
-# Khronos' Vulkan Tutorial Template VSCode
-This is a template repo that includes things needed to get started for my graphics rendering projects.
+# Siren
 
-# Requirements  
-- Visual Studio Code
-- MSVC 2022
-- Vulkan 1.4.x SDK
-- CMake
+A real-time 3d rendering project build in c++20 and Vulkan 1.4.
+
+Siren is a personal graphics project focused on building an atmospheric scene inspired by the Odyssey while exploring real-time rendering techniques through Vulkan.
+
+## Required Local Assets
+
+Some demonstration assets are/will be intentionally excluded from version control for copyright reasons.
