@@ -20,6 +20,9 @@ constexpr bool enableValidationLayers = false;
 constexpr bool enableValidationLayers = true;
 #endif
 
+uint32_t WIDTH = 1200;
+uint32_t HEIGHT = 800;
+
 class SirenScene
 {
 public:
@@ -41,16 +44,20 @@ private:
     vk::raii::SurfaceKHR surface = VK_NULL_HANDLE;
     vk::raii::SwapchainKHR swapchain = VK_NULL_HANDLE;
     std::vector<vk::Image> swapchainImages{};
-    std::vector<vk::ImageView> swapchainImageViews{};
+    std::vector<vk::raii::ImageView> swapchainImageViews{};
     vk::SurfaceFormatKHR swapchainSurfaceFormat{};
     vk::Extent2D swapchainExtent{};
     vk::Format swapchainFormat = vk::Format::eB8G8R8A8Srgb;
     vk::raii::CommandPool commandPool = VK_NULL_HANDLE;
     vk::raii::CommandBuffers commandBuffers = VK_NULL_HANDLE;
+    std::vector<vk::raii::Fence> inFlightFences;
+    std::vector<vk::raii::Semaphore> presentCompleteSemaphores;
+    std::vector<vk::raii::Semaphore> renderFinishedSemaphores;
 
     uint32_t queueIndex = ~0;
     uint32_t swapchainImageCount = 3;
     uint32_t framesInFlight = 2;
+    uint32_t frameIndex = 0;
 
     const std::vector<char const *> layers =
         {
@@ -67,7 +74,7 @@ private:
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-        window = glfwCreateWindow(1200, 800, "Siren Scene", NULL, NULL);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "Siren Scene", NULL, NULL);
     }
 
     void createInstance()
@@ -176,6 +183,7 @@ private:
                                                              vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
                                         features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
+                                        features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
                                         features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
 
         // Return true if the physicalDevice meets all the criteria
@@ -208,11 +216,11 @@ private:
                            vk::PhysicalDeviceVulkan13Features,
                            vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>
             featureChain = {
-                {},                             // vk::PhysicalDeviceFeatures2
-                {.shaderDrawParameters = true}, // vk::PhysicalDeviceVulkan11Features
-                {.dynamicRendering = true},     // vk::PhysicalDeviceVulkan13Features
-                {.extendedDynamicState = true}  // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
-            };
+                {},                                                   // vk::PhysicalDeviceFeatures2
+                {.shaderDrawParameters = true},                       // vk::PhysicalDeviceVulkan11Features
+                {.synchronization2 = true, .dynamicRendering = true}, // vk::PhysicalDeviceVulkan13Features
+                {.extendedDynamicState = true},                       // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+        };
 
         // create a Device
         float queuePriority = 0.5f;
@@ -281,6 +289,7 @@ private:
     void createCommandPool()
     {
         vk::CommandPoolCreateInfo createInfo = {
+            .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
             .queueFamilyIndex = queueIndex,
         };
 
@@ -297,7 +306,157 @@ private:
 
         commandBuffers = vk::raii::CommandBuffers(device, allocateInfo);
     };
-    
+
+    void createSyncObjects()
+    {
+        inFlightFences.reserve(framesInFlight);
+        presentCompleteSemaphores.reserve(framesInFlight);
+        renderFinishedSemaphores.reserve(swapchainImageCount);
+
+        for (uint32_t i = 0; i < swapchainImageCount; ++i)
+        {
+            renderFinishedSemaphores.emplace_back(device, vk::SemaphoreCreateInfo{});
+        }
+        
+        for (uint32_t i = 0; i < framesInFlight; ++i)
+        {
+            inFlightFences.emplace_back(device, vk::FenceCreateInfo{.flags = vk::FenceCreateFlagBits::eSignaled}); // start signaled
+            presentCompleteSemaphores.emplace_back(device, vk::SemaphoreCreateInfo{});
+        }
+    };
+
+    void drawFrame()
+    {
+        auto waitResult = device.waitForFences({*inFlightFences[frameIndex]}, VK_TRUE, UINT64_MAX);
+        auto [acquireResult, imageIndex] = swapchain.acquireNextImage(UINT64_MAX, presentCompleteSemaphores[frameIndex], VK_NULL_HANDLE);
+
+        vk::raii::CommandBuffer &commandBuffer = commandBuffers[frameIndex];
+        vk::Semaphore renderFinished = *renderFinishedSemaphores[imageIndex];
+        
+        commandBuffer.reset();
+        
+        vk::CommandBufferBeginInfo beginInfo = {.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
+        commandBuffer.begin(beginInfo); // begin rendering
+        
+        vk::ImageMemoryBarrier2 toColorAttachment{
+            .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            .srcAccessMask = {},
+            .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+            .oldLayout = vk::ImageLayout::eUndefined,
+            .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = swapchainImages[imageIndex],
+            .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+        };
+
+        vk::DependencyInfo toColorDependency = {
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &toColorAttachment,
+        };
+
+        commandBuffer.pipelineBarrier2(toColorDependency); // submit to command buffer
+        
+        bool showRed = (static_cast<int>(glfwGetTime()) % 2) == 0;
+
+        vk::RenderingAttachmentInfo colorAttachment = {
+            .imageView = swapchainImageViews[imageIndex],
+            .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+            .resolveMode = vk::ResolveModeFlagBits::eNone,
+            .resolveImageView = {}, // only required when the main color attachment is multisampled
+            .resolveImageLayout = {},
+            .loadOp = vk::AttachmentLoadOp::eClear,   // determines what happens to the swapchain image each frame -> throw away the image for my clear color
+            .storeOp = vk::AttachmentStoreOp::eStore, // determines what happens to the swapchain image each frame -> keep the data in the image attachment for the presentation engine
+            .clearValue = vk::ClearValue( showRed ? vk::ClearColorValue{1.0f, 0.0f, 0.0f, 1.0f} : vk::ClearColorValue{1.0f, 1.0f, 0.0f, 1.0f} ),
+        };
+
+        vk::RenderingInfo renderingInfo = {
+            .flags = {},
+            .renderArea = {.offset = {0, 0}, .extent = {WIDTH, HEIGHT}},
+            .layerCount = 1,
+            .viewMask = 0,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &colorAttachment,
+            .pDepthAttachment = nullptr,
+            .pStencilAttachment = nullptr,
+        };
+
+        commandBuffer.beginRendering(renderingInfo); // dynamic render pass // groups draw commands using a particular set of image attachments
+        // draws go here
+        commandBuffer.endRendering(); // image stored (eStore) // finished using these attachments
+
+        vk::ImageMemoryBarrier2 presentBarrier = {
+            .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eNone,
+            .dstAccessMask = {},
+            .oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
+            .newLayout = vk::ImageLayout::ePresentSrcKHR,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = swapchainImages[imageIndex],
+            .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+        };
+
+        vk::DependencyInfo presentDependencyInfo = {
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &presentBarrier,
+        };
+
+        commandBuffer.pipelineBarrier2(presentDependencyInfo); // submit to command buffer
+
+        commandBuffer.end();
+
+        vk::CommandBufferSubmitInfo commandInfo = {
+            .commandBuffer = *commandBuffer,
+        };
+
+        // wait until the presentation engine has released the acquired swapchain image before our color-attachment operations use it
+        vk::SemaphoreSubmitInfo submitSemaphoreInfo = {
+            .semaphore = presentCompleteSemaphores[frameIndex],
+            // .value = 0,
+            .stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            .deviceIndex = 0,
+        };
+
+        // signal when this submission has completed for presentation to wait on it
+        vk::SemaphoreSubmitInfo signalSignalInfo = {
+            .semaphore = renderFinished,
+            // .value = 0,
+            .stageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .deviceIndex = 0,
+        };
+
+        vk::SubmitInfo2 submitInfo = {
+            .waitSemaphoreInfoCount = 1,
+            .pWaitSemaphoreInfos = &submitSemaphoreInfo,
+            .commandBufferInfoCount = 1,
+            .pCommandBufferInfos = &commandInfo,
+            .signalSemaphoreInfoCount = 1,
+            .pSignalSemaphoreInfos = &signalSignalInfo,
+        };
+
+        // reset only now: from this point we know that a submission will be made which will eventually signal the fence
+        device.resetFences({*inFlightFences[frameIndex]});
+
+        queue.submit2(submitInfo, inFlightFences[frameIndex]);
+
+        vk::SwapchainKHR swapchainHandle = *swapchain;
+
+        vk::PresentInfoKHR presentInfo{
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &renderFinished,
+            .swapchainCount = 1,
+            .pSwapchains = &swapchainHandle,
+            .pImageIndices = &imageIndex,
+        };
+
+        auto presentResult = queue.presentKHR(presentInfo);
+        
+        frameIndex = (frameIndex + 1) % framesInFlight;
+    };
+
     void initVulkan()
     {
         createInstance();
@@ -308,6 +467,8 @@ private:
         createImageViews();
         createCommandPool();
         allocateCommandBuffers();
+        createSyncObjects();
+        drawFrame();
     }
 
     void mainLoop()
@@ -315,11 +476,13 @@ private:
         while (!glfwWindowShouldClose(window))
         {
             glfwPollEvents();
+            drawFrame();
         }
     }
 
     void cleanup()
     {
+        device.waitIdle(); // let the GPU finish running before cleaning up
         glfwDestroyWindow(window);
         glfwTerminate();
     }

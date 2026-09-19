@@ -16,7 +16,9 @@
         "editor.suggest.showKeywords": false,       // C++ keywords such as if, class, return, and constexpr
         "editor.suggest.showVariables": true,       // local, global, and namespace variables
         "editor.suggest.showProperties": true,      // members classified as properties by IntelliSense
-        "editor.suggest.showFields": true           // struct and class data members such as createInfo.sType
+        "editor.suggest.showFields": true,          // struct and class data members such as createInfo.sType
+        "editor.selectionHighlight": false,         // highlight other similar words to the current one selected
+        "editor.occurrencesHighlight": "off",       // controls references/occurrences of the symbol your cursor is on
     },
     "C_Cpp.default.includePath": [
         "${workspaceFolder}/external/glfw-src/include",
