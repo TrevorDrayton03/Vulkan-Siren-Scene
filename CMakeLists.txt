@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(VulkanTutorial LANGUAGES CXX)
+project(VulkanTutorial LANGUAGES C CXX)
 
 # forces c++20 globally for all targets, including dependencies
 set(CMAKE_CXX_STANDARD 20)
@@ -51,7 +51,27 @@ FetchContent_Declare(
     GIT_TAG v3.4.0
 )
 
-FetchContent_MakeAvailable(glfw glm tinyobjloader stb vma)
+FetchContent_Declare(
+    tinygltf
+    GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
+    GIT_TAG v3.0.1
+)
+
+set(TINYGLTF3_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(glfw glm tinyobjloader tinygltf stb vma)
+
+add_library(tinygltf STATIC
+    "${tinygltf_SOURCE_DIR}/tiny_gltf_v3.c"
+)
+
+target_include_directories(tinygltf PUBLIC
+    "${tinygltf_SOURCE_DIR}"
+)
+
+target_compile_definitions(tinygltf PUBLIC
+    TINYGLTF3_ENABLE_FS
+)
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 # allows designated initializers
@@ -59,7 +79,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
 )
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/external/stb-src") # stb is comprised of single-header libraries and does not provide a normal CMake target to link against
-target_link_libraries(${PROJECT_NAME} Vulkan::Vulkan glfw glm::glm tinyobjloader GPUOpen::VulkanMemoryAllocator)
+target_link_libraries(${PROJECT_NAME} Vulkan::Vulkan glfw glm::glm tinyobjloader tinygltf GPUOpen::VulkanMemoryAllocator)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 

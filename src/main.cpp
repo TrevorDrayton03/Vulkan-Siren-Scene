@@ -2,6 +2,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define GLM_ENABLE_EXPERIMENTAL
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS 1
+#define VMA_IMPLEMENTATION
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan_raii.hpp>
 #include <glm/glm.hpp>
@@ -13,6 +14,9 @@
 #include <stdexcept>
 #include <cstdlib>
 #include <vk_mem_alloc.h>
+#include "tiny_gltf_v3.h"
+#include <filesystem>
+#include <cstring>
 
 #ifdef NDEBUG
 constexpr bool enableValidationLayers = false;
@@ -23,6 +27,13 @@ constexpr bool enableValidationLayers = true;
 uint32_t WIDTH = 1200;
 uint32_t HEIGHT = 800;
 
+struct Vertex
+{
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 uv;
+};
+
 class SirenScene
 {
 public:
@@ -30,6 +41,7 @@ public:
     {
         initWindow();
         initVulkan();
+        initSiren();
         mainLoop();
         cleanup();
     }
@@ -53,11 +65,20 @@ private:
     std::vector<vk::raii::Fence> inFlightFences;
     std::vector<vk::raii::Semaphore> presentCompleteSemaphores;
     std::vector<vk::raii::Semaphore> renderFinishedSemaphores;
+    VmaAllocator allocator = VK_NULL_HANDLE;
+    VkBuffer vertexBuffer = VK_NULL_HANDLE;
+    VmaAllocation vertexAllocation = VK_NULL_HANDLE;
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    VmaAllocation stagingAllocation = VK_NULL_HANDLE;
 
     uint32_t queueIndex = ~0;
     uint32_t swapchainImageCount = 3;
     uint32_t framesInFlight = 2;
     uint32_t frameIndex = 0;
+
+    tg3_model sirenModel;
+    std::vector<Vertex> sirenVertices;
+    std::vector<uint32_t> sirenIndices;
 
     const std::vector<char const *> layers =
         {
@@ -317,7 +338,7 @@ private:
         {
             renderFinishedSemaphores.emplace_back(device, vk::SemaphoreCreateInfo{});
         }
-        
+
         for (uint32_t i = 0; i < framesInFlight; ++i)
         {
             inFlightFences.emplace_back(device, vk::FenceCreateInfo{.flags = vk::FenceCreateFlagBits::eSignaled}); // start signaled
@@ -332,23 +353,24 @@ private:
 
         vk::raii::CommandBuffer &commandBuffer = commandBuffers[frameIndex];
         vk::Semaphore renderFinished = *renderFinishedSemaphores[imageIndex];
-        
+
         commandBuffer.reset();
-        
+
         vk::CommandBufferBeginInfo beginInfo = {.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
-        commandBuffer.begin(beginInfo); // begin rendering
-        
+        commandBuffer.begin(beginInfo);
+
+        // image memory barrier that includes an execution dependency, a memory dependency, and an image layout transition
         vk::ImageMemoryBarrier2 toColorAttachment{
-            .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            .srcAccessMask = {},
-            .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-            .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+            .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput, // first sync scope: COLOR_ATTACHMENT_OUTPUT ops from commands earlier in submission order must finish completing
+            .srcAccessMask = {},                                                // first access scope: no memory operations
+            .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput, // second sync scope: COLOR_ATTACHMENT_OUTPUT ops from commands later in submission order must wait for completion
+            .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,        // COLOR_ATTACHMENT_WRITE accesses to the specified image subresources
             .oldLayout = vk::ImageLayout::eUndefined,
             .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = swapchainImages[imageIndex],
-            .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+            .image = swapchainImages[imageIndex],                                                                                                          // image whose subresources are affected by the image memory barrier
+            .subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1}, // subresource range affected by the image memory barrier
         };
 
         vk::DependencyInfo toColorDependency = {
@@ -356,8 +378,8 @@ private:
             .pImageMemoryBarriers = &toColorAttachment,
         };
 
-        commandBuffer.pipelineBarrier2(toColorDependency); // submit to command buffer
-        
+        commandBuffer.pipelineBarrier2(toColorDependency);
+
         bool showRed = (static_cast<int>(glfwGetTime()) % 2) == 0;
 
         vk::RenderingAttachmentInfo colorAttachment = {
@@ -368,7 +390,7 @@ private:
             .resolveImageLayout = {},
             .loadOp = vk::AttachmentLoadOp::eClear,   // determines what happens to the swapchain image each frame -> throw away the image for my clear color
             .storeOp = vk::AttachmentStoreOp::eStore, // determines what happens to the swapchain image each frame -> keep the data in the image attachment for the presentation engine
-            .clearValue = vk::ClearValue( showRed ? vk::ClearColorValue{1.0f, 0.0f, 0.0f, 1.0f} : vk::ClearColorValue{1.0f, 1.0f, 0.0f, 1.0f} ),
+            .clearValue = vk::ClearValue(showRed ? vk::ClearColorValue{1.0f, 0.0f, 0.0f, 1.0f} : vk::ClearColorValue{1.0f, 1.0f, 0.0f, 1.0f}),
         };
 
         vk::RenderingInfo renderingInfo = {
@@ -404,7 +426,7 @@ private:
             .pImageMemoryBarriers = &presentBarrier,
         };
 
-        commandBuffer.pipelineBarrier2(presentDependencyInfo); // submit to command buffer
+        commandBuffer.pipelineBarrier2(presentDependencyInfo);
 
         commandBuffer.end();
 
@@ -453,9 +475,198 @@ private:
         };
 
         auto presentResult = queue.presentKHR(presentInfo);
-        
+
         frameIndex = (frameIndex + 1) % framesInFlight;
     };
+
+    void loadModel()
+    {
+        tg3_parse_options options;
+        tg3_error_stack errors;
+        tg3_parse_options_init(&options);
+        tg3_error_stack_init(&errors);
+
+        constexpr char path[] = "assets/models/blushing_mermaid.glb";
+
+        const tg3_error_code result = tg3_parse_file(
+            &sirenModel,
+            &errors,
+            path,
+            sizeof(path) - 1,
+            &options);
+
+        for (uint32_t i = 0; i < errors.count; ++i)
+        {
+            const char *message = errors.entries[i].message;
+            std::cerr << (message ? message : "Unknown glTF message") << '\n';
+        }
+
+        tg3_error_stack_free(&errors);
+
+        if (result != TG3_OK)
+        {
+            tg3_model_free(&sirenModel);
+            throw std::runtime_error("Failed to load siren model");
+        }
+
+        std::cout << "Siren model loaded\n"
+                  << "File: " << std::filesystem::absolute(path) << '\n'
+                  << "Bytes: " << std::filesystem::file_size(path) << '\n\n';
+    };
+
+    void inspectGeometry(tg3_model &model)
+    {
+        std::cout << "\nMeshes: " << model.meshes_count
+                  << "\nTextures: " << model.textures_count
+                  << "\nMaterials: " << model.materials_count
+                  << "\nNodes: " << model.nodes_count
+                  << "\nAccessors: " << model.accessors_count << '\n';
+        std::cout << '\n';
+
+        for (uint32_t i = 0; i < model.accessors_count; ++i)
+        {
+            const auto &a = model.accessors[i];
+
+            std::cout << "Accessor " << i
+                      << ": count=" << a.count
+                      << ", type=" << a.type
+                      << ", component=" << a.component_type
+                      << ", offset=" << a.byte_offset
+                      << ", normalized=" << a.normalized
+                      << ", sparse=" << a.sparse.is_sparse;
+
+            if (a.buffer_view >= 0)
+            {
+                const auto &view = model.buffer_views[a.buffer_view];
+                std::cout << ", stride=" << view.byte_stride;
+            }
+            std::cout << '\n';
+        }
+
+        for (uint32_t m = 0; m < model.meshes_count; ++m)
+        {
+            const auto &mesh = model.meshes[m];
+
+            for (uint32_t p = 0; p < mesh.primitives_count; ++p)
+            {
+                const auto &primitive = mesh.primitives[p];
+
+                std::cout << "\nMesh " << m << ", primitive " << p << '\n';
+
+                for (uint32_t a = 0; a < primitive.attributes_count; ++a)
+                {
+                    const auto &[name, accessorIndex] = primitive.attributes[a];
+                    const auto &[data, length] = name;
+
+                    std::cout.write(data, static_cast<std::streamsize>(length));
+                    std::cout << " -> accessor " << accessorIndex << '\n';
+                }
+
+                std::cout << "Indices -> accessor " << primitive.indices << '\n';
+            }
+        }
+    }
+
+    void extractGeometry()
+    {
+        auto packedData = [&](uint32_t accessorIndex, int expectedType, int expectedComponent, uint64_t elementBytes) -> const uint8_t *
+        {
+            const auto &accessor = sirenModel.accessors[accessorIndex];
+            const auto &view = sirenModel.buffer_views[accessor.buffer_view];
+            const auto &bytes = sirenModel.buffers[view.buffer].data;
+            return bytes.data + view.byte_offset + accessor.byte_offset;
+        };
+
+        const auto *positions = packedData(0, TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_FLOAT, 12);
+        const auto *normals = packedData(1, TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_FLOAT, 12);
+        const auto *uvs = packedData(2, TG3_TYPE_VEC2, TG3_COMPONENT_TYPE_FLOAT, 8);
+        const auto *sourceIndices = packedData(6, TG3_TYPE_SCALAR, TG3_COMPONENT_TYPE_UNSIGNED_SHORT, 8);
+
+        const auto vertexCount = sirenModel.accessors[0].count;
+        const auto indexCount = sirenModel.accessors[6].count;
+
+        sirenVertices.resize(static_cast<size_t>(vertexCount));
+        sirenIndices.resize(static_cast<size_t>(indexCount));
+
+        for (int i = 0; i < sirenVertices.size(); ++i)
+        {
+            float position[3];
+            float normal[3];
+            float uv[2];
+
+            std::memcpy(position, positions + i * 12, sizeof(position));
+            std::memcpy(normal, normals + i * 12, sizeof(normal));
+            std::memcpy(uv, uvs + i * 8, sizeof(uv));
+
+            sirenVertices[i] = Vertex{
+                glm::vec3(position[0], position[1], position[2]),
+                glm::vec3(normal[0], normal[1], normal[2]),
+                glm::vec2(uv[0], uv[1])};
+        };
+
+        for (size_t i = 0; i < sirenIndices.size(); ++i)
+        {
+            uint16_t index;
+            std::memcpy(&index, sourceIndices + i * 2, sizeof(index));
+            sirenIndices[i] = index;
+        };
+
+        std::cout << "Extracted " << sirenVertices.size() << " vertices and "
+                  << sirenIndices.size() << " indices\n";
+    }
+
+    void createAllocator()
+    {
+        VmaAllocatorCreateInfo info{};
+        info.instance = static_cast<VkInstance>(*instance);
+        info.physicalDevice = static_cast<VkPhysicalDevice>(*physicalDevice);
+        info.device = static_cast<VkDevice>(*device);
+        info.vulkanApiVersion = VK_API_VERSION_1_3;
+
+        vmaCreateAllocator(&info, &allocator);
+    }
+
+    void createVertexBuffer()
+    {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(Vertex) * sirenVertices.size();
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocationInfo{};
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+        vmaCreateBuffer(allocator, &bufferInfo, &allocationInfo, &vertexBuffer, &vertexAllocation, nullptr);
+    }
+
+    void createVertexStagingBuffer()
+    {
+
+        const auto size = sizeof(Vertex) * sirenVertices.size();
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocationInfo{};
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocationInfo.flags =
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | // tells vma: cpu needs to write memory sequentially
+            VMA_ALLOCATION_CREATE_MAPPED_BIT;                        // tells vma: map the allocation immediately and expose its CPU pointer through allocationDetails.pMappedData, avoiding a separate vmaMapMemory() call.
+
+        VmaAllocationInfo allocationDetails{};
+
+        vmaCreateBuffer(allocator, &bufferInfo, &allocationInfo, &stagingBuffer, &stagingAllocation, &allocationDetails);
+
+        std::memcpy(allocationDetails.pMappedData, sirenVertices.data(), static_cast<size_t>(size));
+        vmaFlushAllocation(allocator, stagingAllocation, 0, size); // makes CPU writes from memcpy visible to the GPU
+    }
+
+    void uploadVertices()
+    {
+    }
 
     void initVulkan()
     {
@@ -463,12 +674,22 @@ private:
         createSurface();
         choosePhysicalDevice();
         createLogicalDevice();
+        createAllocator();
         createSwapchain();
         createImageViews();
         createCommandPool();
         allocateCommandBuffers();
         createSyncObjects();
-        drawFrame();
+    }
+
+    void initSiren()
+    {
+        loadModel();
+        // inspectGeometry(sirenModel);
+        extractGeometry();
+        createVertexBuffer();
+        createVertexStagingBuffer();
+        uploadVertices();
     }
 
     void mainLoop()
@@ -483,6 +704,24 @@ private:
     void cleanup()
     {
         device.waitIdle(); // let the GPU finish running before cleaning up
+
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+        stagingBuffer = VK_NULL_HANDLE;
+        stagingAllocation = VK_NULL_HANDLE;
+
+        vmaDestroyBuffer(allocator, vertexBuffer, vertexAllocation);
+        vertexBuffer = VK_NULL_HANDLE;
+        vertexAllocation = VK_NULL_HANDLE;
+
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+        stagingBuffer = VK_NULL_HANDLE;
+        stagingAllocation = VK_NULL_HANDLE;
+
+        vmaDestroyAllocator(allocator);
+        allocator = VK_NULL_HANDLE;
+
+        tg3_model_free(&sirenModel);
+
         glfwDestroyWindow(window);
         glfwTerminate();
     }
