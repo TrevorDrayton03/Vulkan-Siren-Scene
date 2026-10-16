@@ -356,7 +356,7 @@ private:
 
         commandBuffer.reset();
 
-        vk::CommandBufferBeginInfo beginInfo = {.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
+        vk::CommandBufferBeginInfo beginInfo = {.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit}; 
         commandBuffer.begin(beginInfo);
 
         // image memory barrier that includes an execution dependency, a memory dependency, and an image layout transition
@@ -569,21 +569,21 @@ private:
 
     void extractGeometry()
     {
-        auto packedData = [&](uint32_t accessorIndex, int expectedType, int expectedComponent, uint64_t elementBytes) -> const uint8_t *
+        auto packedData = [&](uint32_t accessorIndex) -> const uint8_t *
         {
-            const auto &accessor = sirenModel.accessors[accessorIndex];
-            const auto &view = sirenModel.buffer_views[accessor.buffer_view];
-            const auto &bytes = sirenModel.buffers[view.buffer].data;
+            const tg3_accessor &accessor = sirenModel.accessors[accessorIndex];
+            const tg3_buffer_view &view = sirenModel.buffer_views[accessor.buffer_view];
+            const tg3_span_u8 &bytes = sirenModel.buffers[view.buffer].data;
             return bytes.data + view.byte_offset + accessor.byte_offset;
         };
 
-        const auto *positions = packedData(0, TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_FLOAT, 12);
-        const auto *normals = packedData(1, TG3_TYPE_VEC3, TG3_COMPONENT_TYPE_FLOAT, 12);
-        const auto *uvs = packedData(2, TG3_TYPE_VEC2, TG3_COMPONENT_TYPE_FLOAT, 8);
-        const auto *sourceIndices = packedData(6, TG3_TYPE_SCALAR, TG3_COMPONENT_TYPE_UNSIGNED_SHORT, 8);
+        const uint8_t *positions = packedData(0);
+        const uint8_t *normals = packedData(1);
+        const uint8_t *uvs = packedData(2);
+        const uint8_t *sourceIndices = packedData(6);
 
-        const auto vertexCount = sirenModel.accessors[0].count;
-        const auto indexCount = sirenModel.accessors[6].count;
+        const uint64_t vertexCount = sirenModel.accessors[0].count;
+        const uint64_t indexCount = sirenModel.accessors[6].count;
 
         sirenVertices.resize(static_cast<size_t>(vertexCount));
         sirenIndices.resize(static_cast<size_t>(indexCount));
@@ -629,13 +629,13 @@ private:
     void createVertexBuffer()
     {
         VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(Vertex) * sirenVertices.size();
-        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;                                 
+        bufferInfo.size = sizeof(Vertex) * sirenVertices.size();                                 
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT; 
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;                                     
 
         VmaAllocationCreateInfo allocationInfo{};
-        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE; 
 
         vmaCreateBuffer(allocator, &bufferInfo, &allocationInfo, &vertexBuffer, &vertexAllocation, nullptr);
     }
@@ -643,15 +643,15 @@ private:
     void createVertexStagingBuffer()
     {
 
-        const auto size = sizeof(Vertex) * sirenVertices.size();
+        const vk::DeviceSize size = sizeof(Vertex) * sirenVertices.size();
         VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = size;
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; 
+        bufferInfo.size = size; // 463104                                
+        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;   
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;       
 
         VmaAllocationCreateInfo allocationInfo{};
-        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO; 
         allocationInfo.flags =
             VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | // tells vma: cpu needs to write memory sequentially
             VMA_ALLOCATION_CREATE_MAPPED_BIT;                        // tells vma: map the allocation immediately and expose its CPU pointer through allocationDetails.pMappedData, avoiding a separate vmaMapMemory() call.
@@ -666,6 +666,53 @@ private:
 
     void uploadVertices()
     {
+        const vk::DeviceSize size = sizeof(Vertex) * sirenVertices.size(); // 463104
+
+        vk::CommandBufferAllocateInfo allocateInfo{};
+        allocateInfo.commandPool = *commandPool;
+        allocateInfo.level = vk::CommandBufferLevel::ePrimary;
+        allocateInfo.commandBufferCount = 1;
+
+        vk::raii::CommandBuffers uploadCommands(device, allocateInfo);
+        auto &cmd = uploadCommands.front();
+
+        vk::CommandBufferBeginInfo beginInfo{};
+        beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+        cmd.begin(beginInfo);
+
+        vk::BufferCopy region{};
+        region.size = size;
+
+        cmd.copyBuffer(vk::Buffer(stagingBuffer), vk::Buffer(vertexBuffer), region);
+
+        vk::BufferMemoryBarrier2 barrier{}; // records a dependency from the copy's transfer write to later vertex-attribute reads; the reads must wait and see the copied data
+        barrier.srcStageMask = vk::PipelineStageFlagBits2::eCopy; // 4294967296Ui64 // Visual Studio's hover tooltip is displaying the vlaue using Microsoft's Ui64r notation
+        barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;              
+        barrier.dstStageMask = vk::PipelineStageFlagBits2::eVertexAttributeInput; 
+        barrier.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead;        
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;                    
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;                    
+        barrier.buffer = vk::Buffer(vertexBuffer);
+        barrier.offset = 0;
+        barrier.size = size;
+
+        vk::DependencyInfo dependency{};
+        dependency.bufferMemoryBarrierCount = 1;
+        dependency.pBufferMemoryBarriers = &barrier;
+
+        cmd.pipelineBarrier2(dependency);
+        cmd.end();
+
+        vk::CommandBufferSubmitInfo commandInfo{};
+        commandInfo.commandBuffer = *cmd;
+
+        vk::SubmitInfo2 submitInfo{};
+        submitInfo.commandBufferInfoCount = 1;
+        submitInfo.pCommandBufferInfos = &commandInfo;
+
+        queue.submit2(submitInfo, nullptr);
+
+        queue.waitIdle();
     }
 
     void initVulkan()
@@ -685,7 +732,7 @@ private:
     void initSiren()
     {
         loadModel();
-        // inspectGeometry(sirenModel);
+        inspectGeometry(sirenModel);
         extractGeometry();
         createVertexBuffer();
         createVertexStagingBuffer();
