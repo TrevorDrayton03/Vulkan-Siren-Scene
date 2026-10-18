@@ -17,6 +17,7 @@
 #include "tiny_gltf_v3.h"
 #include <filesystem>
 #include <cstring>
+#include <cstddef>
 
 #ifdef NDEBUG
 constexpr bool enableValidationLayers = false;
@@ -48,7 +49,7 @@ public:
 
 private:
     GLFWwindow *window;
-    vk::raii::Context context;
+    vk::raii::Context context{};
     vk::raii::Instance instance = VK_NULL_HANDLE;
     vk::raii::PhysicalDevice physicalDevice = VK_NULL_HANDLE;
     vk::raii::Device device = VK_NULL_HANDLE;
@@ -62,14 +63,21 @@ private:
     vk::Format swapchainFormat = vk::Format::eB8G8R8A8Srgb;
     vk::raii::CommandPool commandPool = VK_NULL_HANDLE;
     vk::raii::CommandBuffers commandBuffers = VK_NULL_HANDLE;
-    std::vector<vk::raii::Fence> inFlightFences;
-    std::vector<vk::raii::Semaphore> presentCompleteSemaphores;
-    std::vector<vk::raii::Semaphore> renderFinishedSemaphores;
+    std::vector<vk::raii::Fence> inFlightFences{};
+    std::vector<vk::raii::Semaphore> presentCompleteSemaphores{};
+    std::vector<vk::raii::Semaphore> renderFinishedSemaphores{};
+    vk::raii::PipelineLayout pipelineLayout = VK_NULL_HANDLE;
+    vk::raii::Pipeline pipeline = VK_NULL_HANDLE;
+
     VmaAllocator allocator = VK_NULL_HANDLE;
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
     VmaAllocation vertexAllocation = VK_NULL_HANDLE;
-    VkBuffer stagingBuffer = VK_NULL_HANDLE;
-    VmaAllocation stagingAllocation = VK_NULL_HANDLE;
+    VkBuffer vertexStagingBuffer = VK_NULL_HANDLE;
+    VmaAllocation vertexStagingAllocation = VK_NULL_HANDLE;
+    VkBuffer indexBuffer = VK_NULL_HANDLE;
+    VmaAllocation indexAllocation = VK_NULL_HANDLE;
+    VkBuffer indexStagingBuffer = VK_NULL_HANDLE;
+    VmaAllocation indexStagingAllocation = VK_NULL_HANDLE;    
 
     uint32_t queueIndex = ~0;
     uint32_t swapchainImageCount = 3;
@@ -289,6 +297,7 @@ private:
             .oldSwapchain = VK_NULL_HANDLE,
         };
         swapchain = vk::raii::SwapchainKHR(device, createInfo);
+        swapchainExtent = createInfo.imageExtent;
         swapchainImages = swapchain.getImages();
     };
 
@@ -346,6 +355,10 @@ private:
         }
     };
 
+    void createPipeline() {
+
+    };
+
     void drawFrame()
     {
         auto waitResult = device.waitForFences({*inFlightFences[frameIndex]}, VK_TRUE, UINT64_MAX);
@@ -356,7 +369,7 @@ private:
 
         commandBuffer.reset();
 
-        vk::CommandBufferBeginInfo beginInfo = {.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit}; 
+        vk::CommandBufferBeginInfo beginInfo = {.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
         commandBuffer.begin(beginInfo);
 
         // image memory barrier that includes an execution dependency, a memory dependency, and an image layout transition
@@ -395,7 +408,7 @@ private:
 
         vk::RenderingInfo renderingInfo = {
             .flags = {},
-            .renderArea = {.offset = {0, 0}, .extent = {WIDTH, HEIGHT}},
+            .renderArea = {.offset = {0, 0}, .extent = swapchainExtent},
             .layerCount = 1,
             .viewMask = 0,
             .colorAttachmentCount = 1,
@@ -405,7 +418,32 @@ private:
         };
 
         commandBuffer.beginRendering(renderingInfo); // dynamic render pass // groups draw commands using a particular set of image attachments
-        // draws go here
+
+        // bind === tell GPU to use this resource
+        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+        const vk::Viewport viewport = {
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = static_cast<float>(swapchainExtent.width),
+            .height = static_cast<float>(swapchainExtent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+
+        vk::Rect2D scissor = {
+            .offset = {0, 0},
+            .extent = {swapchainExtent.width, swapchainExtent.height},
+        };
+
+        commandBuffer.setScissor(0, scissor);
+        commandBuffer.setViewport(0, viewport);
+
+        commandBuffer.bindVertexBuffers(0, {vertexBuffer}, static_cast<uint32_t>(0));
+        // commandBuffer.bindIndexBuffer(index)
+
+        // uint32_t vertexCount = sirenVertices.size();
+        // commandBuffer.draw(vertexCount, 1, 0, 0);
+
         commandBuffer.endRendering(); // image stored (eStore) // finished using these attachments
 
         vk::ImageMemoryBarrier2 presentBarrier = {
@@ -621,7 +659,7 @@ private:
         info.instance = static_cast<VkInstance>(*instance);
         info.physicalDevice = static_cast<VkPhysicalDevice>(*physicalDevice);
         info.device = static_cast<VkDevice>(*device);
-        info.vulkanApiVersion = VK_API_VERSION_1_3;
+        info.vulkanApiVersion = VK_API_VERSION_1_4;
 
         vmaCreateAllocator(&info, &allocator);
     }
@@ -629,13 +667,13 @@ private:
     void createVertexBuffer()
     {
         VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;                                 
-        bufferInfo.size = sizeof(Vertex) * sirenVertices.size();                                 
-        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT; 
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;                                     
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(Vertex) * sirenVertices.size();
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VmaAllocationCreateInfo allocationInfo{};
-        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE; 
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
         vmaCreateBuffer(allocator, &bufferInfo, &allocationInfo, &vertexBuffer, &vertexAllocation, nullptr);
     }
@@ -645,23 +683,23 @@ private:
 
         const vk::DeviceSize size = sizeof(Vertex) * sirenVertices.size();
         VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO; 
-        bufferInfo.size = size; // 463104                                
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;   
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;       
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size; // 463104
+        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         VmaAllocationCreateInfo allocationInfo{};
-        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO; 
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
         allocationInfo.flags =
             VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | // tells vma: cpu needs to write memory sequentially
             VMA_ALLOCATION_CREATE_MAPPED_BIT;                        // tells vma: map the allocation immediately and expose its CPU pointer through allocationDetails.pMappedData, avoiding a separate vmaMapMemory() call.
 
         VmaAllocationInfo allocationDetails{};
 
-        vmaCreateBuffer(allocator, &bufferInfo, &allocationInfo, &stagingBuffer, &stagingAllocation, &allocationDetails);
+        vmaCreateBuffer(allocator, &bufferInfo, &allocationInfo, &vertexStagingBuffer, &vertexStagingAllocation, &allocationDetails);
 
         std::memcpy(allocationDetails.pMappedData, sirenVertices.data(), static_cast<size_t>(size));
-        vmaFlushAllocation(allocator, stagingAllocation, 0, size); // makes CPU writes from memcpy visible to the GPU
+        vmaFlushAllocation(allocator, vertexStagingAllocation, 0, size); // makes CPU writes from memcpy visible to the GPU
     }
 
     void uploadVertices()
@@ -683,16 +721,104 @@ private:
         vk::BufferCopy region{};
         region.size = size;
 
-        cmd.copyBuffer(vk::Buffer(stagingBuffer), vk::Buffer(vertexBuffer), region);
+        cmd.copyBuffer(vk::Buffer(vertexStagingBuffer), vk::Buffer(vertexBuffer), region);
 
-        vk::BufferMemoryBarrier2 barrier{}; // records a dependency from the copy's transfer write to later vertex-attribute reads; the reads must wait and see the copied data
+        vk::BufferMemoryBarrier2 barrier{};                       // records a dependency from the copy's transfer write to later vertex-attribute reads; the reads must wait and see the copied data
         barrier.srcStageMask = vk::PipelineStageFlagBits2::eCopy; // 4294967296Ui64 // Visual Studio's hover tooltip is displaying the vlaue using Microsoft's Ui64r notation
-        barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;              
-        barrier.dstStageMask = vk::PipelineStageFlagBits2::eVertexAttributeInput; 
-        barrier.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead;        
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;                    
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;                    
+        barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+        barrier.dstStageMask = vk::PipelineStageFlagBits2::eVertexAttributeInput;
+        barrier.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.buffer = vk::Buffer(vertexBuffer);
+        barrier.offset = 0;
+        barrier.size = size;
+
+        vk::DependencyInfo dependency{};
+        dependency.bufferMemoryBarrierCount = 1;
+        dependency.pBufferMemoryBarriers = &barrier;
+
+        cmd.pipelineBarrier2(dependency);
+        cmd.end();
+
+        vk::CommandBufferSubmitInfo commandInfo{};
+        commandInfo.commandBuffer = *cmd;
+
+        vk::SubmitInfo2 submitInfo{};
+        submitInfo.commandBufferInfoCount = 1;
+        submitInfo.pCommandBufferInfos = &commandInfo;
+
+        queue.submit2(submitInfo, nullptr);
+
+        queue.waitIdle();
+    }
+    
+        void createIndexBuffer()
+    {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(uint32_t) * sirenIndices.size();
+        bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocationInfo{};
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+        vmaCreateBuffer(allocator, &bufferInfo, &allocationInfo, &indexBuffer, &indexAllocation, nullptr);
+    }
+
+    void createIndexStagingBuffer()
+    {
+        const vk::DeviceSize size = sizeof(uint32_t) * sirenIndices.size();
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size; 
+        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocationInfo{};
+        allocationInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocationInfo.flags =
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | // tells vma: cpu needs to write memory sequentially
+            VMA_ALLOCATION_CREATE_MAPPED_BIT;                        // tells vma: map the allocation immediately and expose its CPU pointer through allocationDetails.pMappedData, avoiding a separate vmaMapMemory() call.
+
+        VmaAllocationInfo allocationDetails{};
+
+        vmaCreateBuffer(allocator, &bufferInfo, &allocationInfo, &indexStagingBuffer, &indexStagingAllocation, &allocationDetails);
+
+        std::memcpy(allocationDetails.pMappedData, sirenIndices.data(), static_cast<size_t>(size));
+        vmaFlushAllocation(allocator, indexStagingAllocation, 0, size); // makes CPU writes from memcpy visible to the GPU
+    }
+
+    void uploadIndices()
+    {
+        const vk::DeviceSize size = sizeof(uint32_t) * sirenIndices.size();
+
+        vk::CommandBufferAllocateInfo allocateInfo{};
+        allocateInfo.commandPool = *commandPool;
+        allocateInfo.level = vk::CommandBufferLevel::ePrimary;
+        allocateInfo.commandBufferCount = 1;
+
+        vk::raii::CommandBuffers uploadCommands(device, allocateInfo);
+        auto &cmd = uploadCommands.front();
+
+        vk::CommandBufferBeginInfo beginInfo{};
+        beginInfo.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+        cmd.begin(beginInfo);
+
+        vk::BufferCopy region{};
+        region.size = size;
+
+        cmd.copyBuffer(vk::Buffer(indexStagingBuffer), vk::Buffer(indexBuffer), region);
+
+        vk::BufferMemoryBarrier2 barrier{};                       // records a dependency from the copy's transfer write to later index reads; the reads must wait and see the copied data
+        barrier.srcStageMask = vk::PipelineStageFlagBits2::eCopy; // 4294967296Ui64 // Visual Studio's hover tooltip is displaying the vlaue using Microsoft's Ui64r notation
+        barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+        barrier.dstStageMask = vk::PipelineStageFlagBits2::eIndexInput;
+        barrier.dstAccessMask = vk::AccessFlagBits2::eIndexRead;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer = vk::Buffer(indexBuffer);
         barrier.offset = 0;
         barrier.size = size;
 
@@ -727,6 +853,7 @@ private:
         createCommandPool();
         allocateCommandBuffers();
         createSyncObjects();
+        createPipeline();
     }
 
     void initSiren()
@@ -737,6 +864,9 @@ private:
         createVertexBuffer();
         createVertexStagingBuffer();
         uploadVertices();
+        createIndexBuffer();
+        createIndexStagingBuffer();
+        uploadIndices();
     }
 
     void mainLoop()
@@ -752,17 +882,21 @@ private:
     {
         device.waitIdle(); // let the GPU finish running before cleaning up
 
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-        stagingBuffer = VK_NULL_HANDLE;
-        stagingAllocation = VK_NULL_HANDLE;
+        vmaDestroyBuffer(allocator, vertexStagingBuffer, vertexStagingAllocation);
+        vertexStagingBuffer = VK_NULL_HANDLE;
+        vertexStagingAllocation = VK_NULL_HANDLE;
 
         vmaDestroyBuffer(allocator, vertexBuffer, vertexAllocation);
         vertexBuffer = VK_NULL_HANDLE;
         vertexAllocation = VK_NULL_HANDLE;
 
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-        stagingBuffer = VK_NULL_HANDLE;
-        stagingAllocation = VK_NULL_HANDLE;
+        vmaDestroyBuffer(allocator, indexStagingBuffer, indexStagingAllocation);
+        indexStagingBuffer = VK_NULL_HANDLE;
+        indexStagingAllocation = VK_NULL_HANDLE;
+
+        vmaDestroyBuffer(allocator, indexBuffer, indexAllocation);
+        indexBuffer = VK_NULL_HANDLE;
+        indexAllocation = VK_NULL_HANDLE;
 
         vmaDestroyAllocator(allocator);
         allocator = VK_NULL_HANDLE;
