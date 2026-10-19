@@ -16,7 +16,7 @@ set(
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 
 # vulkan-hpp and vulkan_raii.hpp are included with the installed vulkan sdk
-find_package(Vulkan REQUIRED COMPONENTS glslc)
+find_package(Vulkan REQUIRED)
 
 # add_subdirectory("${CMAKE_SOURCE_DIR}/external/glfw")
 file(GLOB_RECURSE SOURCES "src/*.cpp")
@@ -75,20 +75,43 @@ target_compile_definitions(tinygltf PUBLIC
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
-foreach(SHADER siren.vert siren.frag)
-    set(SHADER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/${SHADER}")
-    set(SHADER_HEADER "${SHADER_OUTPUT_DIR}/${SHADER}.spv.h")
-    add_custom_command(
-        OUTPUT "${SHADER_HEADER}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_OUTPUT_DIR}"
-        COMMAND Vulkan::glslc --target-env=vulkan1.3 -O -mfmt=num "${SHADER_SOURCE}" -o "${SHADER_HEADER}"
-        DEPENDS "${SHADER_SOURCE}"
-        VERBATIM
-    )
-    target_sources(${PROJECT_NAME} PRIVATE "${SHADER_HEADER}")
-endforeach()
-target_include_directories(${PROJECT_NAME} PRIVATE "${SHADER_OUTPUT_DIR}")
+find_program(SLANGC_EXECUTABLE
+    NAMES slangc
+    HINTS "$ENV{VULKAN_SDK}/Bin"
+    REQUIRED
+)
+
+set(SHADER_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/model.slang"
+)
+
+set(SHADER_OUTPUT_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/shaders"
+)
+
+set(SHADER_OUTPUT
+    "${SHADER_OUTPUT_DIR}/model.spv"
+)
+
+add_custom_command(
+    OUTPUT "${SHADER_OUTPUT}"
+
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${SHADER_OUTPUT_DIR}"
+
+    COMMAND "${SLANGC_EXECUTABLE}"
+            "${SHADER_SOURCE}"
+            -target spirv
+            -profile spirv_1_4
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -entry vertexMain
+            -entry fragmentMain
+            -o "${SHADER_OUTPUT}"
+
+    DEPENDS "${SHADER_SOURCE}"
+    COMMENT "Compiling Slang shaders"
+)
 
 # allows designated initializers
 target_compile_definitions(${PROJECT_NAME} PRIVATE

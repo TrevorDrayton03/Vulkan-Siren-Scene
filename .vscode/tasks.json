@@ -17,15 +17,15 @@
             ],
             "problemMatcher": []
         },
-        {
-            "label": "Shaders: compile",
-            "type": "shell",
-            "command": "${workspaceFolder}\\compile.bat",
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "problemMatcher": []
-        },
+        // {
+        //     "label": "Shaders: compile",
+        //     "type": "shell",
+        //     "command": "${workspaceFolder}\\compile.bat",
+        //     "options": {
+        //         "cwd": "${workspaceFolder}"
+        //     },
+        //     "problemMatcher": []
+        // },
         {
             "label": "CMake: build",
             "type": "shell",

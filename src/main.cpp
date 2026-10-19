@@ -439,10 +439,9 @@ private:
         commandBuffer.setViewport(0, viewport);
 
         commandBuffer.bindVertexBuffers(0, {vertexBuffer}, static_cast<uint32_t>(0));
-        // commandBuffer.bindIndexBuffer(index)
+        commandBuffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint32); // sirenIndices convers to a uint32_t type
 
-        // uint32_t vertexCount = sirenVertices.size();
-        // commandBuffer.draw(vertexCount, 1, 0, 0);
+        commandBuffer.drawIndexed(sirenIndices.size(), 1, 0, 0, 0);
 
         commandBuffer.endRendering(); // image stored (eStore) // finished using these attachments
 
