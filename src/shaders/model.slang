@@ -18,7 +18,7 @@ struct VertexOutput
     float4 position : SV_POSITION;
 };
 
-[shader("vertex)]
+[shader("vertex")]
 VertexOutput vertexMain(VertexInput input)
 {
     VertexOutput output;
@@ -26,7 +26,7 @@ VertexOutput vertexMain(VertexInput input)
     return output;
 }
 
-[shader("fragment)]
+[shader("fragment")]
 float4 fragmentMain() : SV_Target
 {
     return float4(0.8, 0.6, 0.2, 1.0);

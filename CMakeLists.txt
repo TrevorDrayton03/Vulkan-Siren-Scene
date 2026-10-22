@@ -113,6 +113,12 @@ add_custom_command(
     COMMENT "Compiling Slang shaders"
 )
 
+add_custom_target(compile_shaders
+    DEPENDS "${SHADER_OUTPUT}"
+)
+
+add_dependencies(${PROJECT_NAME} compile_shaders)
+
 # allows designated initializers
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1

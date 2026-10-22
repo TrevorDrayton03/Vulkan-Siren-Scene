@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <cstring>
 #include <cstddef>
+#include <fstream>
 
 #ifdef NDEBUG
 constexpr bool enableValidationLayers = false;
@@ -97,6 +98,23 @@ private:
         {
             vk::KHRSwapchainExtensionName,
     };
+    
+    std::vector<char> readFile(const std::string& filename)
+    {
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+        if (!file.is_open())
+            throw std::runtime_error("Failed to open: " + filename);
+
+        std::vector<char> buffer(file.tellg());
+
+        file.seekg(0);
+
+        if (!file.read(buffer.data(), buffer.size()))
+            throw std::runtime_error("Failed to read: " + filename);
+
+        return buffer;
+    }
 
     void initWindow()
     {
@@ -153,9 +171,9 @@ private:
 
         vk::ApplicationInfo appInfo{
             .pNext = VK_NULL_HANDLE,
-            .pApplicationName = "Siren Scene",
+            .pApplicationName = "Siren",
             .applicationVersion = 1,
-            .pEngineName = "Siren Engine",
+            .pEngineName = "Siren",
             .engineVersion = 1,
             .apiVersion = VK_API_VERSION_1_4,
         };
@@ -355,8 +373,128 @@ private:
         }
     };
 
-    void createPipeline() {
+    void createPipeline() {        
+        std::vector<char> shaderCode = readFile("build/shaders/model.spv");
+        
+        vk::ShaderModuleCreateInfo shaderModuleCreateInfo{
+            .codeSize = shaderCode.size(),
+            .pCode = reinterpret_cast<const uint32_t*>(shaderCode.data()),
+        };
+            
+        vk::raii::ShaderModule shaderModule = device.createShaderModule(shaderModuleCreateInfo);
+        
+        vk::PipelineShaderStageCreateInfo fragmentStageCreateInfo{
+            .stage = vk::ShaderStageFlagBits::eFragment,  
+            .module = *shaderModule,
+            .pName = "fragmentMain",
+        };
+                
+        vk::PipelineShaderStageCreateInfo vertexStageCreateInfo{
+            .stage = vk::ShaderStageFlagBits::eVertex,  
+            .module = *shaderModule,
+            .pName = "vertexMain",
+        };
+        
+        // position
+        vk::VertexInputBindingDescription vertexInputBindingDescriptionPosition{
+            .binding = 0,
+            .stride = sizeof(Vertex),
+            .inputRate = vk::VertexInputRate::eVertex,
+        };
+        
+        vk::VertexInputAttributeDescription vertexInputAttributeDescriptionPosition{
+            .location = 0,
+            .binding = 0,
+            .format = vk::Format::eR32G32B32Sfloat,
+            .offset = 0,
+        };
+        
+        // // normal
+        //         vk::VertexInputBindingDescription vertexInputBindingDescriptionNormal{
+        //     .binding = 0,
+        //     .stride = sizeof(Vertex),
+        //     .inputRate = vk::VertexInputRate::eVertex,
+        // };
+        
+        // vk::VertexInputAttributeDescription vertexInputAttributeDescriptionNormal{
+        //     .location = 1,
+        //     .binding = 0,
+        //     .format = vk::Format::eR32G32B32Sfloat,
+        //     .offset = 0,
+        // };
+        
+        // // uv
+        // vk::VertexInputBindingDescription vertexInputBindingDescriptionUV{
+        //     .binding = 0,
+        //     .stride = sizeof(Vertex),
+        //     .inputRate = vk::VertexInputRate::eVertex,
+        // };
+        
+        // vk::VertexInputAttributeDescription vertexInputAttributeDescriptionUV{
+        //     .location = 2,
+        //     .binding = 0,
+        //     .format = vk::Format::eR32G32B32Sfloat,
+        //     .offset = 0,
+        // };
+        
+        vk::PipelineVertexInputStateCreateInfo pipelineVertexInputStateCreateInfo{
+            .vertexBindingDescriptionCount = 1,
+            .pVertexBindingDescriptions = &vertexInputBindingDescription,
+            .vertexAttributeDescriptionCount = 1,
+            .pVertexAttributeDescriptions = &vertexInputAttributeDescription,
+        };
+        
+        vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo{
+            .topology = vk::PrimitiveTopology::eTriangleList,
+            .primitiveRestartEnable = VK_FALSE,
+        };
+        
+        std::vector<vk::PipelineShaderStageCreateInfo> stages = {
+            vertexStageCreateInfo,
+            fragmentStageCreateInfo,
+        };
+              
+        vk::GraphicsPipelineCreateInfo createInfo{
+            .stageCount = 2,
+            .pStages = stages.data(),
+            .pVertexInputState = &pipelineVertexInputStateCreateInfo,
+            .pInputAssemblyState = &inputAssemblyStateCreateInfo,
+            // .pTessellationState = {},
+            .pViewportState = {},
+            .pRasterizationState = {},
+            .pMultisampleState = {},
+            .pDepthStencilState = {},
+            .pColorBlendState = {},
+            .pDynamicState = {},
+            .layout = {},
+        };
+    };
+    
+    void drawSiren(vk::raii::CommandBuffer& commandBuffer)
+    {
+        // bind === tell GPU to use this resource
+        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+        const vk::Viewport viewport = {
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = static_cast<float>(swapchainExtent.width),
+            .height = static_cast<float>(swapchainExtent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
 
+        vk::Rect2D scissor = {
+            .offset = {0, 0},
+            .extent = {swapchainExtent.width, swapchainExtent.height},
+        };
+
+        commandBuffer.setScissor(0, scissor);
+        commandBuffer.setViewport(0, viewport);
+
+        commandBuffer.bindVertexBuffers(0, {vertexBuffer}, static_cast<uint32_t>(0));
+        commandBuffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint32); // sirenIndices convers to a uint32_t type
+
+        commandBuffer.drawIndexed(sirenIndices.size(), 1, 0, 0, 0);  
     };
 
     void drawFrame()
@@ -371,7 +509,7 @@ private:
 
         vk::CommandBufferBeginInfo beginInfo = {.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
         commandBuffer.begin(beginInfo);
-
+        
         // image memory barrier that includes an execution dependency, a memory dependency, and an image layout transition
         vk::ImageMemoryBarrier2 toColorAttachment{
             .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput, // first sync scope: COLOR_ATTACHMENT_OUTPUT ops from commands earlier in submission order must finish completing
@@ -418,30 +556,8 @@ private:
         };
 
         commandBuffer.beginRendering(renderingInfo); // dynamic render pass // groups draw commands using a particular set of image attachments
-
-        // bind === tell GPU to use this resource
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
-        const vk::Viewport viewport = {
-            .x = 0.0f,
-            .y = 0.0f,
-            .width = static_cast<float>(swapchainExtent.width),
-            .height = static_cast<float>(swapchainExtent.height),
-            .minDepth = 0.0f,
-            .maxDepth = 1.0f,
-        };
-
-        vk::Rect2D scissor = {
-            .offset = {0, 0},
-            .extent = {swapchainExtent.width, swapchainExtent.height},
-        };
-
-        commandBuffer.setScissor(0, scissor);
-        commandBuffer.setViewport(0, viewport);
-
-        commandBuffer.bindVertexBuffers(0, {vertexBuffer}, static_cast<uint32_t>(0));
-        commandBuffer.bindIndexBuffer(indexBuffer, 0, vk::IndexType::eUint32); // sirenIndices convers to a uint32_t type
-
-        commandBuffer.drawIndexed(sirenIndices.size(), 1, 0, 0, 0);
+        
+        drawSiren(commandBuffer);
 
         commandBuffer.endRendering(); // image stored (eStore) // finished using these attachments
 
